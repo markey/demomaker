@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+dist-ssr/
+build/
+out/
+exports/
+export/
+
+# Test coverage
+coverage/
+
+# Vite / bundler caches
+.vite/
+
+# TypeScript
+*.tsbuildinfo
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.log
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Editor and OS junk
+.DS_Store
+Thumbs.db
+.idea/
+*.iml
+
+# Electron / packaging artifacts
+release/
+*.asar
+
