@@ -1,6 +1,6 @@
-# Demomaker (MVP)
+# Demomaker (MVP) — Electron App
 
-A modern take on the classic demomaker: real‑time, GPU‑driven visuals with chainable effects, a timeline, and export paths. This repository contains the initial MVP scaffold: a TypeScript core, React UI shell, a minimal effect and transition, and a global post chain wired through Three.js.
+A modern take on the classic demomaker: real‑time, GPU‑driven visuals with chainable effects, a timeline, and export paths. The app now runs as a desktop Electron application bundling a Vite + React renderer and a TypeScript core engine with Three.js.
 
 ## What’s Here (MVP)
 - Core engine scaffolding in TypeScript (no globals, deterministic timebase hooks)
@@ -32,19 +32,20 @@ Prerequisites:
 - Node.js 18+ (or 20+ recommended)
 - A GPU/driver supporting WebGL2
 
-Install and run:
+Install dependencies:
 - `npm install`
-- `npm run dev`
-- Open http://localhost:5173
 
-Build and preview:
-- `npm run build`
-- `npm run preview` (serves the production build)
+Run in development (single command):
+- `npm run dev` — starts Vite and launches Electron automatically.
+
+Production build and run:
+- `npm run start` — builds the renderer and launches Electron using the built `dist/index.html`.
 
 Scripts:
-- `npm run dev` — Vite dev server
-- `npm run build` — Type check + production build
-- `npm run preview` — Preview prod build
+- `npm run dev` — Unified dev (Vite + Electron)
+- `npm run start` — Build then run Electron against local files
+- `npm run build` — Type check + production build of the renderer
+- `npm run preview` — Serve the production build (browser only, optional)
 - `npm run typecheck` — TypeScript project check
 
 ## Project Structure
@@ -55,6 +56,7 @@ Scripts:
   - `effects/WireMorph` — MVP WireMorph effect skeleton
   - `transitions/CrossFade` — Basic cross‑fade shader pass
 - `src/utils/` — Utilities (seeded RNG, WAV encoder)
+ - `electron/` — Electron main and preload (desktop shell)
 
 ## The Project Model (MVP)
 Defined in the Zustand store as a single JSON source of truth. Example default:
@@ -102,10 +104,10 @@ See `src/plugins/effects/WireMorph` and `src/plugins/transitions/CrossFade.ts` f
 These are stubs for wiring into a proper Exporter UI and eventual WebCodecs/MediaRecorder paths.
 
 ## Browser Support
-- Modern Chromium/Firefox with WebGL2 enabled. High‑DPI and post effects scale with DPR and preview size.
+- Electron (Chromium) with WebGL2 enabled. High‑DPI and post effects scale with DPR and window size.
 
 ## Troubleshooting
-- Black screen: Check WebGL2 support `chrome://gpu` or browser flags, ensure a GPU is available.
+- Black screen: Ensure your GPU supports WebGL2. In Electron dev mode, open DevTools (View → Toggle Developer Tools) and check console for WebGL context errors.
 - Type errors: Run `npm run typecheck` for details.
 - Performance: Reduce window size; bloom is active by default in the project JSON.
 
