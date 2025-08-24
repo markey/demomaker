@@ -5,6 +5,7 @@ import { getEffect } from '../plugins/PluginManager';
 
 export const Preview: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const project = useProjectStore((s) => s.project);
   const time = useProjectStore((s) => s.transport.time);
 
@@ -17,8 +18,63 @@ export const Preview: React.FC = () => {
     const canvas = canvasRef.current!;
     rmRef.current = new RendererManager(canvas, project.meta.fps);
     rmRef.current.start();
+    
+    // Ensure initial sizing is correct with a small delay
+    setTimeout(() => {
+      const container = containerRef.current;
+      if (container) {
+        const rect = container.getBoundingClientRect();
+        if (rect.width && rect.height) {
+          canvas.width = rect.width;
+          canvas.height = rect.height;
+          rmRef.current?.forceViewportUpdate?.();
+        }
+      }
+    }, 100);
+    
     return () => { rmRef.current?.dispose(); rmRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Add ResizeObserver for proper canvas sizing
+  useEffect(() => {
+    const container = containerRef.current;
+    const canvas = canvasRef.current;
+    if (!container || !canvas) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        // Force canvas size update to prevent drift
+        if (canvas.width !== width || canvas.height !== height) {
+          canvas.width = width;
+          canvas.height = height;
+          // Trigger immediate viewport update
+          rmRef.current?.forceViewportUpdate?.();
+        }
+      }
+    });
+
+    resizeObserver.observe(container);
+    
+    // Backup window resize listener
+    const handleWindowResize = () => {
+      if (container && canvas) {
+        const rect = container.getBoundingClientRect();
+        if (rect.width && rect.height) {
+          canvas.width = rect.width;
+          canvas.height = rect.height;
+          rmRef.current?.forceViewportUpdate?.();
+        }
+      }
+    };
+    
+    window.addEventListener('resize', handleWindowResize);
+    
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', handleWindowResize);
+    };
   }, []);
 
   // Load/Reload effect when module or fps changes
@@ -42,7 +98,7 @@ export const Preview: React.FC = () => {
   useEffect(() => { void time; }, [time]);
 
   return (
-    <div style={{position:'relative', width:'100%', height:'100%', display:'grid', overflow:'hidden'}}>
+    <div ref={containerRef} style={{position:'relative', width:'100%', height:'100%', display:'grid', overflow:'hidden'}}>
       <canvas ref={canvasRef} style={{width:'100%', height:'100%', display:'block'}} />
     </div>
   );

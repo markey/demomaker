@@ -26,6 +26,7 @@ export class RendererManager {
   private _lastSafeDpr = 0;
   private _maxDim = 4096;
   private _dprCap = 1.5; // cap DPR to reduce FBO pressure and drift
+  private _resizeTimeout: number | null = null;
 
   constructor(canvas: HTMLCanvasElement, fps = 60) {
     this.canvas = canvas;
@@ -47,13 +48,25 @@ export class RendererManager {
 
   getSize() {
     const rect = this.canvas.getBoundingClientRect();
-    const w = rect.width || this.canvas.clientWidth || this.canvas.width;
-    const h = rect.height || this.canvas.clientHeight || this.canvas.height;
+    // Use getBoundingClientRect for more accurate sizing, fallback to client dimensions
+    let w = rect.width;
+    let h = rect.height;
+    
+    // Fallback to client dimensions if getBoundingClientRect returns 0
+    if (!w || !h) {
+      w = this.canvas.clientWidth || this.canvas.width;
+      h = this.canvas.clientHeight || this.canvas.height;
+    }
+    
+    // Ensure we have valid dimensions
+    w = Math.max(1, Math.round(w));
+    h = Math.max(1, Math.round(h));
+    
     const dpr = window.devicePixelRatio || 1; // raw DPR (clamped later)
     return { w, h, dpr };
   }
 
-  private updateViewport() {
+  updateViewport() {
     let { w, h, dpr } = this.getSize();
     // Guard against zero or negative sizes during layout transitions
     w = Math.max(1, Math.floor(w));
@@ -82,7 +95,13 @@ export class RendererManager {
     h = Math.max(1, Math.round(h));
     const maxDprByDim = this._maxDim / Math.max(w, h);
     const safeDpr = Math.max(1, Math.min(dpr, this._dprCap, maxDprByDim));
-    if (w !== this._lastW || h !== this._lastH || safeDpr !== this._lastSafeDpr) this.updateViewport();
+    
+    // More precise size checking to prevent drift
+    const sizeChanged = Math.abs(w - this._lastW) > 0.5 || Math.abs(h - this._lastH) > 0.5 || Math.abs(safeDpr - this._lastSafeDpr) > 0.01;
+    
+    if (sizeChanged) {
+      this.updateViewport();
+    }
   }
 
   createContext(fps: number): EffectContext {
@@ -118,6 +137,10 @@ export class RendererManager {
   start() {
     if (this._running) return;
     this._running = true;
+    
+    // Initial viewport setup
+    this.updateViewport();
+    
     const loop = (tms: number) => {
       const t = tms / 1000;
       const dt = this._scheduler.tick(t) || 0;
@@ -141,15 +164,37 @@ export class RendererManager {
   stop() {
     this._running = false;
     cancelAnimationFrame(this._raf);
+    if (this._resizeTimeout) {
+      clearTimeout(this._resizeTimeout);
+      this._resizeTimeout = null;
+    }
     window.removeEventListener('resize', this._onResize);
   }
 
   setParams(params: any) { (this as any)._params = params; }
 
-  private _onResize = () => { requestAnimationFrame(() => this.updateViewport()); };
+  // Force a viewport update (useful for external resize handling)
+  forceViewportUpdate() {
+    this.updateViewport();
+  }
+
+  private _onResize = () => { 
+    // Debounce resize events to prevent excessive updates
+    if (this._resizeTimeout) {
+      clearTimeout(this._resizeTimeout);
+    }
+    this._resizeTimeout = setTimeout(() => {
+      this.updateViewport();
+      this._resizeTimeout = null;
+    }, 16); // ~60fps debounce
+  };
 
   dispose() {
     this.stop();
+    if (this._resizeTimeout) {
+      clearTimeout(this._resizeTimeout);
+      this._resizeTimeout = null;
+    }
     this._effect?.dispose();
     this.renderer.dispose();
   }
