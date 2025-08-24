@@ -9,9 +9,9 @@ export const Preview: React.FC = () => {
   const project = useProjectStore((s) => s.project);
   const time = useProjectStore((s) => s.transport.time);
 
-  const track = useMemo(() => project.tracks.find(t => t.kind === 'effect'), [project.tracks]);
+  const activeTrack = useProjectStore((s) => s.getActiveTrack(time));
   const rmRef = useRef<RendererManager | null>(null);
-  const moduleId = track?.module;
+  const moduleId = activeTrack?.module;
 
   // Init once
   useEffect(() => {
@@ -79,20 +79,20 @@ export const Preview: React.FC = () => {
 
   // Load/Reload effect when module or fps changes
   useEffect(() => {
-    const rm = rmRef.current; if (!rm || !moduleId || !track) return;
+    const rm = rmRef.current; if (!rm || !moduleId || !activeTrack) return;
     const mod = getEffect(moduleId);
     if (!mod) return;
-    rm.loadEffect(mod, track.params, project.meta.fps).then(() => {
-      rm.setParams(track.params);
+    rm.loadEffect(mod, activeTrack.params, project.meta.fps).then(() => {
+      rm.setParams(activeTrack.params);
       configurePost(rm, project.post as any);
     });
   }, [moduleId, project.meta.fps]);
 
   // Update params without reloading
   useEffect(() => {
-    const rm = rmRef.current; if (!rm || !track) return;
-    rm.setParams(track.params);
-  }, [track?.params]);
+    const rm = rmRef.current; if (!rm || !activeTrack) return;
+    rm.setParams(activeTrack.params);
+  }, [activeTrack?.params]);
 
   // Placeholder: later drive time via transport/audio
   useEffect(() => { void time; }, [time]);
@@ -100,6 +100,40 @@ export const Preview: React.FC = () => {
   return (
     <div ref={containerRef} style={{position:'relative', width:'100%', height:'100%', display:'grid', overflow:'hidden'}}>
       <canvas ref={canvasRef} style={{width:'100%', height:'100%', display:'block'}} />
+      
+      {/* No track indicator */}
+      {!activeTrack && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          color: '#666',
+          fontSize: '18px',
+          textAlign: 'center',
+          pointerEvents: 'none'
+        }}>
+          <div style={{marginBottom: '8px'}}>No active track</div>
+          <div style={{fontSize: '14px', opacity: 0.7}}>Add a track in the timeline</div>
+        </div>
+      )}
+      
+      {/* Current track info */}
+      {activeTrack && (
+        <div style={{
+          position: 'absolute',
+          top: '12px',
+          left: '12px',
+          background: 'rgba(0,0,0,0.7)',
+          color: '#fff',
+          padding: '6px 12px',
+          borderRadius: '4px',
+          fontSize: '12px',
+          pointerEvents: 'none'
+        }}>
+          {activeTrack.module.split('/').pop()} • {time.toFixed(1)}s
+        </div>
+      )}
     </div>
   );
 };

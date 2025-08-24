@@ -48,9 +48,15 @@ export interface TransportState {
 interface ProjectState {
   project: Project;
   transport: TransportState;
+  selectedTrackId: string | null;
   setTime: (t: number) => void;
   play: () => void;
   pause: () => void;
+  addTrack: (track: Track) => void;
+  removeTrack: (trackId: string) => void;
+  updateTrackRange: (trackId: string, range: TimeRange) => void;
+  getActiveTrack: (time: number) => Track | null;
+  selectTrack: (trackId: string | null) => void;
 }
 
 const defaultProject: Project = {
@@ -67,8 +73,17 @@ const defaultProject: Project = {
 export const useProjectStore = create<ProjectState>((set) => ({
   project: defaultProject,
   transport: { playing: false, time: 0, loop: null },
+  selectedTrackId: null,
   setTime: (t) => set((s) => ({ transport: { ...s.transport, time: Math.max(0, Math.min(t, s.project.meta.duration)) } })),
   play: () => set((s) => ({ transport: { ...s.transport, playing: true } })),
-  pause: () => set((s) => ({ transport: { ...s.transport, playing: false } }))
+  pause: () => set((s) => ({ transport: { ...s.transport, playing: false } })),
+  addTrack: (track) => set((s) => ({ project: { ...s.project, tracks: [...s.project.tracks, track] } })),
+  removeTrack: (trackId) => set((s) => ({ project: { ...s.project, tracks: s.project.tracks.filter(t => t.id !== trackId) } })),
+  updateTrackRange: (trackId, range) => set((s) => ({ project: { ...s.project, tracks: s.project.tracks.map(t => t.id === trackId ? { ...t, range } : t) } })),
+  getActiveTrack: (time) => {
+    const state = useProjectStore.getState();
+    return state.project.tracks.find(track => time >= track.range[0] && time < track.range[1]) || null;
+  },
+  selectTrack: (trackId) => set((s) => ({ selectedTrackId: trackId })),
 }));
 
