@@ -21,6 +21,9 @@ export class RendererManager {
   private _composer?: EffectComposer;
   private _renderPass?: RenderPass;
   private _bloom?: UnrealBloomPass;
+  private _lastW = 0;
+  private _lastH = 0;
+  private _lastDpr = 0;
 
   constructor(canvas: HTMLCanvasElement, fps = 60) {
     this.canvas = canvas;
@@ -40,16 +43,36 @@ export class RendererManager {
   }
 
   private updateViewport() {
-    const { w, h, dpr } = this.getSize();
-    this.renderer.setPixelRatio(dpr);
+    let { w, h, dpr } = this.getSize();
+    // Guard against zero or negative sizes during layout transitions
+    w = Math.max(1, Math.floor(w));
+    h = Math.max(1, Math.floor(h));
+
+    // Clamp effective DPR so FBOs never exceed device limits
+    const gl = this.renderer.getContext() as WebGL2RenderingContext;
+    const maxRB = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) as number;
+    const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+    const maxDim = Math.max(1, Math.min(maxRB || 4096, maxTex || 4096));
+    const maxDprByDim = maxDim / Math.max(w, h);
+    const safeDpr = Math.max(1, Math.min(dpr, 2, maxDprByDim));
+
+    this.renderer.setPixelRatio(safeDpr);
     this.renderer.setSize(w, h, false);
     const cam = (this._effect?.camera) || this.sceneGraph.camera;
     cam.aspect = w / h;
     cam.updateProjectionMatrix();
-    this._effect?.resize?.(w, h, dpr);
-    this._composer?.setPixelRatio(dpr);
+    this._effect?.resize?.(w, h, safeDpr);
+    this._composer?.setPixelRatio(safeDpr);
     this._composer?.setSize(w, h);
     this._bloom?.setSize(w, h);
+    this._lastW = w; this._lastH = h; this._lastDpr = safeDpr;
+  }
+
+  private ensureViewport() {
+    const { w, h, dpr } = this.getSize();
+    if (w !== this._lastW || h !== this._lastH || dpr !== this._lastDpr) {
+      this.updateViewport();
+    }
   }
 
   createContext(fps: number): EffectContext {
@@ -89,6 +112,8 @@ export class RendererManager {
       const t = tms / 1000;
       const dt = this._scheduler.tick(t) || 0;
       this._time += dt;
+      // Keep renderer/composer/camera sizes in sync with CSS size
+      this.ensureViewport();
       this._effect?.update(dt, this._time, (this as any)._params || {});
       if (this._composer && this._renderPass) {
         this._composer.render();
@@ -149,4 +174,3 @@ export function configurePost(rm: RendererManager, post: PostPassConfig) {
     }
   }
 }
-

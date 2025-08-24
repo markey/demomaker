@@ -42,7 +42,7 @@ export const Preview: React.FC = () => {
   useEffect(() => { void time; }, [time]);
 
   return (
-    <div style={{position:'relative', width:'100%', height:'100%', display:'grid'}}>
+    <div style={{position:'relative', width:'100%', height:'100%', display:'grid', overflow:'hidden'}}>
       <canvas ref={canvasRef} style={{width:'100%', height:'100%', display:'block'}} />
     </div>
   );

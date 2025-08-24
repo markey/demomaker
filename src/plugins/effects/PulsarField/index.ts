@@ -141,8 +141,7 @@ class PulsarFieldInstance implements EffectInstance {
       fragmentShader: fragment,
       transparent: true,
       depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      morphTargets: true
+      blending: THREE.AdditiveBlending
     });
 
     this.points = new THREE.Points(geo, this.mat);
