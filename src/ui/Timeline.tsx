@@ -128,7 +128,7 @@ export const Timeline: React.FC = () => {
       {/* Main timeline track */}
       <div 
         style={{
-          height: 40, 
+          height: 72, 
           background: '#0b0b0c', 
           border: '1px solid #222', 
           marginTop: 6, 
@@ -205,7 +205,7 @@ export const Timeline: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: 10,
+              fontSize: 14,
               color: '#fff',
               fontWeight: 'bold',
               border: track.id === selectedTrackId 
