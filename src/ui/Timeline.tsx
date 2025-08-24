@@ -112,6 +112,8 @@ export const Timeline: React.FC = () => {
     const rect = timelineRef.current?.getBoundingClientRect();
     if (!rect) return;
     
+    console.log(`Starting ${type} for track:`, trackId, 'at position:', e.clientX);
+    
     setDragState({
       type,
       trackId,
@@ -145,14 +147,18 @@ export const Timeline: React.FC = () => {
     } else if (dragState.type === 'resize-start') {
       // Resize from start (left edge)
       const newStart = Math.max(0, Math.min(dragState.originalRange[1] - 0.5, dragState.originalRange[0] + deltaTime));
-      newRange = [newStart, track.range[1]];
+      newRange = [newStart, dragState.originalRange[1]];
     } else if (dragState.type === 'resize-end') {
       // Resize from end (right edge)
       const newEnd = Math.max(dragState.originalRange[0] + 0.5, Math.min(meta.duration, dragState.originalRange[1] + deltaTime));
-      newRange = [track.range[0], newEnd];
+      newRange = [dragState.originalRange[0], newEnd];
     }
     
-    updateTrackRange(dragState.trackId, newRange);
+    // Only update if the range actually changed
+    if (newRange[0] !== track.range[0] || newRange[1] !== track.range[1]) {
+      console.log(`Updating track ${dragState.trackId} range:`, track.range, '→', newRange);
+      updateTrackRange(dragState.trackId, newRange);
+    }
   }, [dragState, tracks, meta.duration, updateTrackRange]);
 
   const handleMouseUp = useCallback(() => {
@@ -324,13 +330,17 @@ export const Timeline: React.FC = () => {
               opacity: track.id === selectedTrackId ? 1 : 0.9,
               userSelect: 'none'
             }}
+            onClick={(e) => {
+              e.stopPropagation();
+              selectTrack(track.id);
+            }}
             onMouseDown={(e) => handleMouseDown(e, track.id, 'move')}
             onDoubleClick={(e) => handleTrackDoubleClick(e, track.id)}
             onMouseEnter={(e) => {
               if (playbackMode !== 'playback') {
                 e.currentTarget.style.transform = 'scale(1.02)';
                 e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
-                e.currentTarget.style.cursor = 'grabbing';
+                e.currentTarget.style.cursor = 'grab';
               }
             }}
             onMouseLeave={(e) => {
@@ -340,58 +350,78 @@ export const Timeline: React.FC = () => {
                 e.currentTarget.style.cursor = 'grab';
               }
             }}
-            title={`${track.module} • ${track.range[0].toFixed(1)}s - ${track.range[1].toFixed(1)}s • Drag to move, drag edges to resize`}
+            title={`${track.module} • ${track.range[0].toFixed(1)}s - ${track.range[1].toFixed(1)}s • Click to select, drag to move, drag edges to resize`}
           >
             {track.module.split('/').pop()}
-            
-            {/* Resize handles - only show when selected and not in playback mode */}
-            {track.id === selectedTrackId && playbackMode !== 'playback' && (
-              <>
-                {/* Left resize handle */}
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: 0,
-                    top: 0,
-                    bottom: 0,
-                    width: 8,
-                    background: 'rgba(255,255,255,0.3)',
-                    cursor: 'ew-resize',
-                    borderRadius: '2px 0 0 2px'
-                  }}
-                  onMouseDown={(e) => handleMouseDown(e, track.id, 'resize-start')}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'rgba(255,255,255,0.5)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'rgba(255,255,255,0.3)';
-                  }}
-                />
-                
-                {/* Right resize handle */}
-                <div
-                  style={{
-                    position: 'absolute',
-                    right: 0,
-                    top: 0,
-                    bottom: 0,
-                    width: 8,
-                    background: 'rgba(255,255,255,0.3)',
-                    cursor: 'ew-resize',
-                    borderRadius: '0 2px 2px 0'
-                  }}
-                  onMouseDown={(e) => handleMouseDown(e, track.id, 'resize-end')}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'rgba(255,255,255,0.5)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'rgba(255,255,255,0.3)';
-                  }}
-                />
-              </>
-            )}
           </div>
         ))}
+        
+        {/* Resize handles - rendered separately to avoid cursor conflicts */}
+        {tracks.map((track) => 
+          playbackMode !== 'playback' ? (
+            <React.Fragment key={`resize-${track.id}`}>
+              {/* Left resize handle */}
+              <div
+                style={{
+                  position: 'absolute',
+                  left: `calc(${(track.range[0] / meta.duration) * 100}% - 4px)`,
+                  top: 8,
+                  bottom: 8,
+                  width: 8,
+                  background: track.id === selectedTrackId ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.3)',
+                  cursor: 'ew-resize',
+                  borderRadius: '2px 0 0 2px',
+                  zIndex: 15,
+                  border: `1px solid ${track.id === selectedTrackId ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.5)'}`
+                }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  selectTrack(track.id); // Select track first
+                  handleMouseDown(e, track.id, 'resize-start');
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.8)';
+                  e.currentTarget.style.borderColor = 'rgba(255,255,255,1)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = track.id === selectedTrackId ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.3)';
+                  e.currentTarget.style.borderColor = track.id === selectedTrackId ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.5)';
+                }}
+              />
+              
+              {/* Right resize handle */}
+              <div
+                style={{
+                  position: 'absolute',
+                  left: `calc(${(track.range[1] / meta.duration) * 100}% - 4px)`,
+                  top: 8,
+                  bottom: 8,
+                  width: 8,
+                  background: track.id === selectedTrackId ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.3)',
+                  cursor: 'ew-resize',
+                  borderRadius: '0 2px 2px 0',
+                  zIndex: 15,
+                  border: `1px solid ${track.id === selectedTrackId ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.5)'}`
+                }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  selectTrack(track.id); // Select track first
+                  handleMouseDown(e, track.id, 'resize-end');
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(255,255,255,0.8)';
+                  e.currentTarget.style.borderColor = 'rgba(255,255,255,1)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = track.id === selectedTrackId ? 'rgba(255,255,255,0.6)' : 'rgba(255,255,255,0.3)';
+                  e.currentTarget.style.borderColor = track.id === selectedTrackId ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.5)';
+                }}
+              />
+            </React.Fragment>
+          ) : null
+        )}
       </div>
       
       {/* Track list */}
