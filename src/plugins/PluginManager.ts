@@ -2,13 +2,15 @@ import type { EffectModule, TransitionModule } from '../engine/types';
 import { WireMorph } from './effects/WireMorph';
 import { ParticleGrid } from './effects/ParticleGrid';
 import { VoronoiFlow } from './effects/VoronoiFlow';
+import { PulsarField } from './effects/PulsarField';
 import { CrossFadeTransition } from './transitions/CrossFade';
 
 // Simple in-bundle registry for MVP; later replace with dynamic import and manifests
 const effectRegistry: Record<string, EffectModule> = {
   [WireMorph.meta.id]: WireMorph,
   [ParticleGrid.meta.id]: ParticleGrid,
-  [VoronoiFlow.meta.id]: VoronoiFlow
+  [VoronoiFlow.meta.id]: VoronoiFlow,
+  [PulsarField.meta.id]: PulsarField
 };
 
 const transitionRegistry: Record<string, TransitionModule> = {
