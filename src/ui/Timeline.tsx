@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useRef } from 'react';
 import { useProjectStore } from '../state/projectStore';
 import type { Track } from '../state/projectStore';
 
@@ -12,7 +12,16 @@ export const Timeline: React.FC = () => {
   const addTrack = useProjectStore((s) => s.addTrack);
   const removeTrack = useProjectStore((s) => s.removeTrack);
   const selectTrack = useProjectStore((s) => s.selectTrack);
+  const updateTrackRange = useProjectStore((s) => s.updateTrackRange);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
+  const [dragState, setDragState] = useState<{
+    type: 'move' | 'resize-start' | 'resize-end' | null;
+    trackId: string;
+    startX: number;
+    startTime: number;
+    originalRange: [number, number];
+  } | null>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
   const width = 1000;
   
   const handleTimelineClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -89,9 +98,81 @@ export const Timeline: React.FC = () => {
     const frames = Math.floor((seconds % 1) * meta.fps);
     return `${mins}:${secs.toString().padStart(2, '0')}.${frames.toString().padStart(2, '0')}`;
   };
+
+  // Drag and resize handlers
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>, trackId: string, type: 'move' | 'resize-start' | 'resize-end') => {
+    if (playbackMode === 'playback') return;
+    
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const track = tracks.find(t => t.id === trackId);
+    if (!track) return;
+    
+    const rect = timelineRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    
+    setDragState({
+      type,
+      trackId,
+      startX: e.clientX,
+      startTime: (e.clientX - rect.left) / rect.width * meta.duration,
+      originalRange: [...track.range] as [number, number]
+    });
+    
+    // Select the track when starting to drag
+    selectTrack(trackId);
+  }, [playbackMode, tracks, meta.duration, selectTrack]);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!dragState || !timelineRef.current) return;
+    
+    const rect = timelineRef.current.getBoundingClientRect();
+    const currentX = e.clientX;
+    const deltaX = currentX - dragState.startX;
+    const deltaTime = (deltaX / rect.width) * meta.duration;
+    
+    const track = tracks.find(t => t.id === dragState.trackId);
+    if (!track) return;
+    
+    let newRange: [number, number] = [...track.range];
+    
+    if (dragState.type === 'move') {
+      // Move the entire track
+      const newStart = Math.max(0, Math.min(meta.duration - (track.range[1] - track.range[0]), dragState.originalRange[0] + deltaTime));
+      const duration = track.range[1] - track.range[0];
+      newRange = [newStart, newStart + duration];
+    } else if (dragState.type === 'resize-start') {
+      // Resize from start (left edge)
+      const newStart = Math.max(0, Math.min(dragState.originalRange[1] - 0.5, dragState.originalRange[0] + deltaTime));
+      newRange = [newStart, track.range[1]];
+    } else if (dragState.type === 'resize-end') {
+      // Resize from end (right edge)
+      const newEnd = Math.max(dragState.originalRange[0] + 0.5, Math.min(meta.duration, dragState.originalRange[1] + deltaTime));
+      newRange = [track.range[0], newEnd];
+    }
+    
+    updateTrackRange(dragState.trackId, newRange);
+  }, [dragState, tracks, meta.duration, updateTrackRange]);
+
+  const handleMouseUp = useCallback(() => {
+    setDragState(null);
+  }, []);
+
+  // Add global mouse event listeners
+  React.useEffect(() => {
+    if (dragState) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+  }, [dragState, handleMouseMove, handleMouseUp]);
   
   return (
-    <div style={{padding:'8px 12px', borderTop:'1px solid #222'}}>
+    <div ref={timelineRef} style={{padding:'8px 12px', borderTop:'1px solid #222'}}>
       <div style={{fontSize:12, opacity:0.75}}>
         Timeline • {meta.duration.toFixed(1)}s @ {meta.fps}fps • t={formatTime(t)}
         {hoverTime !== null && (
@@ -121,7 +202,7 @@ export const Timeline: React.FC = () => {
         {playbackMode === 'playback' ? (
           <span style={{color: '#4a9eff'}}>▶️ Playback Mode • Timeline editing disabled</span>
         ) : (
-          'Click to set time • Double-click empty area to add track • Double-click track to remove'
+          'Click to set time • Drag tracks to move • Drag edges to resize • Double-click empty area to add track • Double-click track to remove'
         )}
       </div>
       
@@ -134,7 +215,7 @@ export const Timeline: React.FC = () => {
           marginTop: 6, 
           position: 'relative', 
           overflow: 'hidden',
-          cursor: playbackMode === 'playback' ? 'default' : 'pointer',
+          cursor: dragState ? 'grabbing' : (playbackMode === 'playback' ? 'default' : 'pointer'),
           opacity: playbackMode === 'playback' ? 0.7 : 1
         }}
         onClick={handleTimelineClick}
@@ -142,6 +223,36 @@ export const Timeline: React.FC = () => {
         onMouseMove={handleTimelineMouseMove}
         onMouseLeave={handleTimelineMouseLeave}
       >
+        {/* Drag indicator overlay */}
+        {dragState && (
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(74, 158, 255, 0.1)',
+            border: '2px dashed #4a9eff',
+            pointerEvents: 'none',
+            zIndex: 10
+          }}>
+            <div style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              background: 'rgba(0,0,0,0.8)',
+              color: '#4a9eff',
+              padding: '8px 12px',
+              borderRadius: '4px',
+              fontSize: '12px',
+              fontWeight: 'bold'
+            }}>
+              {dragState.type === 'move' ? 'Moving track...' : 
+               dragState.type === 'resize-start' ? 'Resizing start...' : 'Resizing end...'}
+            </div>
+          </div>
+        )}
         {/* Time markers */}
         {Array.from({ length: Math.floor(meta.duration) + 1 }, (_, i) => (
           <div
@@ -191,8 +302,6 @@ export const Timeline: React.FC = () => {
         {tracks.map((track) => (
           <div
             key={track.id}
-            onClick={(e) => handleTrackClick(e, track.id)}
-            onDoubleClick={(e) => handleTrackDoubleClick(e, track.id)}
             style={{
               position: 'absolute',
               left: `${(track.range[0] / meta.duration) * 100}%`,
@@ -201,7 +310,7 @@ export const Timeline: React.FC = () => {
               bottom: 8,
               background: track.kind === 'effect' ? '#4a9eff' : '#ff6b4a',
               borderRadius: 2,
-              cursor: 'pointer',
+              cursor: playbackMode === 'playback' ? 'default' : 'grab',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -212,19 +321,75 @@ export const Timeline: React.FC = () => {
                 ? '2px solid #fff' 
                 : '1px solid rgba(255,255,255,0.2)',
               transition: 'all 0.1s ease',
-              opacity: track.id === selectedTrackId ? 1 : 0.9
+              opacity: track.id === selectedTrackId ? 1 : 0.9,
+              userSelect: 'none'
             }}
+            onMouseDown={(e) => handleMouseDown(e, track.id, 'move')}
+            onDoubleClick={(e) => handleTrackDoubleClick(e, track.id)}
             onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'scale(1.02)';
-              e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
+              if (playbackMode !== 'playback') {
+                e.currentTarget.style.transform = 'scale(1.02)';
+                e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
+                e.currentTarget.style.cursor = 'grabbing';
+              }
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'scale(1)';
-              e.currentTarget.style.boxShadow = 'none';
+              if (playbackMode !== 'playback') {
+                e.currentTarget.style.transform = 'scale(1)';
+                e.currentTarget.style.boxShadow = 'none';
+                e.currentTarget.style.cursor = 'grab';
+              }
             }}
-            title={`${track.module} • ${track.range[0].toFixed(1)}s - ${track.range[1].toFixed(1)}s`}
+            title={`${track.module} • ${track.range[0].toFixed(1)}s - ${track.range[1].toFixed(1)}s • Drag to move, drag edges to resize`}
           >
             {track.module.split('/').pop()}
+            
+            {/* Resize handles - only show when selected and not in playback mode */}
+            {track.id === selectedTrackId && playbackMode !== 'playback' && (
+              <>
+                {/* Left resize handle */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: 8,
+                    background: 'rgba(255,255,255,0.3)',
+                    cursor: 'ew-resize',
+                    borderRadius: '2px 0 0 2px'
+                  }}
+                  onMouseDown={(e) => handleMouseDown(e, track.id, 'resize-start')}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.5)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.3)';
+                  }}
+                />
+                
+                {/* Right resize handle */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    right: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: 8,
+                    background: 'rgba(255,255,255,0.3)',
+                    cursor: 'ew-resize',
+                    borderRadius: '0 2px 2px 0'
+                  }}
+                  onMouseDown={(e) => handleMouseDown(e, track.id, 'resize-end')}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.5)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.3)';
+                  }}
+                />
+              </>
+            )}
           </div>
         ))}
       </div>
@@ -250,9 +415,20 @@ export const Timeline: React.FC = () => {
                 cursor: playbackMode === 'playback' ? 'default' : 'pointer',
                 padding: '2px 4px',
                 borderRadius: '2px',
-                background: track.id === selectedTrackId ? 'rgba(74, 158, 255, 0.1)' : 'transparent'
+                background: track.id === selectedTrackId ? 'rgba(74, 158, 255, 0.1)' : 'transparent',
+                transition: 'all 0.1s ease'
               }}
               onClick={() => playbackMode !== 'playback' && selectTrack(track.id)}
+              onMouseEnter={(e) => {
+                if (playbackMode !== 'playback' && track.id !== selectedTrackId) {
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (playbackMode !== 'playback' && track.id !== selectedTrackId) {
+                  e.currentTarget.style.background = 'transparent';
+                }
+              }}
             >
               {track.module.split('/').pop()} • {track.range[0].toFixed(1)}s - {track.range[1].toFixed(1)}s
             </div>
