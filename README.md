@@ -8,6 +8,8 @@ A modern take on the classic demomaker: real‑time, GPU‑driven visuals with c
 - Renderer with Three.js WebGL2, EffectComposer, and a global Bloom pass
 - In‑bundle Plugin registry with:
   - Effect: `@pack/wire-morph` (icosahedron points/edges, morph + autorotate)
+  - Effect: `@pack/particle-grid` (animated particle heightfield grid)
+  - Effect: `@pack/voronoi-flow` (screen‑space voronoi shader)
   - Transition: `@trans/cross-fade` (fullscreen shader mix)
 - React UI shell with Zustand store:
   - Library (placeholder), Preview, Timeline, Inspector, Transport
@@ -54,6 +56,8 @@ Scripts:
 - `src/engine/` — Core engine modules (renderer, resources, audio stub, scheduler, export)
 - `src/plugins/` — In‑bundle plugins
   - `effects/WireMorph` — MVP WireMorph effect skeleton
+  - `effects/ParticleGrid` — Instanced points animated as a wave grid
+  - `effects/VoronoiFlow` — Fullscreen shader effect
   - `transitions/CrossFade` — Basic cross‑fade shader pass
 - `src/utils/` — Utilities (seeded RNG, WAV encoder)
  - `electron/` — Electron main and preload (desktop shell)
