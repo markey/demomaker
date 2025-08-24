@@ -8,6 +8,7 @@ export const Preview: React.FC = () => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const project = useProjectStore((s) => s.project);
   const time = useProjectStore((s) => s.transport.time);
+  const playbackMode = useProjectStore((s) => s.transport.playbackMode);
 
   const activeTrack = useProjectStore((s) => s.getActiveTrack(time));
   const rmRef = useRef<RendererManager | null>(null);
@@ -113,8 +114,15 @@ export const Preview: React.FC = () => {
           textAlign: 'center',
           pointerEvents: 'none'
         }}>
-          <div style={{marginBottom: '8px'}}>No active track</div>
-          <div style={{fontSize: '14px', opacity: 0.7}}>Add a track in the timeline</div>
+          <div style={{marginBottom: '8px'}}>
+            {playbackMode === 'playback' ? 'No active effect' : 'No active track'}
+          </div>
+          <div style={{fontSize: '14px', opacity: 0.7}}>
+            {playbackMode === 'playback' 
+              ? 'Add tracks to the timeline' 
+              : 'Add a track in the timeline'
+            }
+          </div>
         </div>
       )}
       
@@ -134,6 +142,39 @@ export const Preview: React.FC = () => {
           {activeTrack.module.split('/').pop()} • {time.toFixed(1)}s
         </div>
       )}
+      
+      {/* Mode indicator */}
+      <div style={{
+        position: 'absolute',
+        top: '12px',
+        right: '12px',
+        background: playbackMode === 'playback' ? 'rgba(74, 158, 255, 0.8)' : 'rgba(102, 102, 102, 0.8)',
+        color: '#fff',
+        padding: '4px 8px',
+        borderRadius: '4px',
+        fontSize: '10px',
+        fontWeight: 'bold',
+        pointerEvents: 'none',
+        textTransform: 'uppercase'
+      }}>
+        {playbackMode === 'playback' ? 'Playback' : 'Edit'}
+      </div>
+      
+      {/* Time indicator */}
+      <div style={{
+        position: 'absolute',
+        bottom: '12px',
+        right: '12px',
+        background: 'rgba(0,0,0,0.7)',
+        color: '#fff',
+        padding: '6px 12px',
+        borderRadius: '4px',
+        fontSize: '12px',
+        pointerEvents: 'none',
+        fontFamily: 'monospace'
+      }}>
+        {Math.floor(time / 60)}:{(time % 60).toFixed(1).padStart(4, '0')}
+      </div>
     </div>
   );
 };

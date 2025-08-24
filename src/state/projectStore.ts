@@ -42,7 +42,8 @@ export interface Project {
 export interface TransportState {
   playing: boolean;
   time: number; // seconds
-  loop?: [number, number] | null;
+  loop: [number, number] | null;
+  playbackMode: 'edit' | 'playback';
 }
 
 interface ProjectState {
@@ -52,11 +53,13 @@ interface ProjectState {
   setTime: (t: number) => void;
   play: () => void;
   pause: () => void;
+  stop: () => void;
   addTrack: (track: Track) => void;
   removeTrack: (trackId: string) => void;
   updateTrackRange: (trackId: string, range: TimeRange) => void;
   getActiveTrack: (time: number) => Track | null;
   selectTrack: (trackId: string | null) => void;
+  setPlaybackMode: (mode: 'edit' | 'playback') => void;
 }
 
 const defaultProject: Project = {
@@ -72,11 +75,12 @@ const defaultProject: Project = {
 
 export const useProjectStore = create<ProjectState>((set) => ({
   project: defaultProject,
-  transport: { playing: false, time: 0, loop: null },
+  transport: { playing: false, time: 0, loop: null, playbackMode: 'edit' },
   selectedTrackId: null,
   setTime: (t) => set((s) => ({ transport: { ...s.transport, time: Math.max(0, Math.min(t, s.project.meta.duration)) } })),
   play: () => set((s) => ({ transport: { ...s.transport, playing: true } })),
   pause: () => set((s) => ({ transport: { ...s.transport, playing: false } })),
+  stop: () => set((s) => ({ transport: { ...s.transport, playing: false, time: 0 } })),
   addTrack: (track) => set((s) => ({ project: { ...s.project, tracks: [...s.project.tracks, track] } })),
   removeTrack: (trackId) => set((s) => ({ project: { ...s.project, tracks: s.project.tracks.filter(t => t.id !== trackId) } })),
   updateTrackRange: (trackId, range) => set((s) => ({ project: { ...s.project, tracks: s.project.tracks.map(t => t.id === trackId ? { ...t, range } : t) } })),
@@ -85,5 +89,6 @@ export const useProjectStore = create<ProjectState>((set) => ({
     return state.project.tracks.find(track => time >= track.range[0] && time < track.range[1]) || null;
   },
   selectTrack: (trackId) => set((s) => ({ selectedTrackId: trackId })),
+  setPlaybackMode: (mode) => set((s) => ({ transport: { ...s.transport, playbackMode: mode } })),
 }));
 

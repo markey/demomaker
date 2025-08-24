@@ -7,6 +7,7 @@ export const Timeline: React.FC = () => {
   const tracks = useProjectStore((s) => s.project.tracks);
   const t = useProjectStore((s) => s.transport.time);
   const selectedTrackId = useProjectStore((s) => s.selectedTrackId);
+  const playbackMode = useProjectStore((s) => s.transport.playbackMode);
   const setTime = useProjectStore((s) => s.setTime);
   const addTrack = useProjectStore((s) => s.addTrack);
   const removeTrack = useProjectStore((s) => s.removeTrack);
@@ -15,6 +16,9 @@ export const Timeline: React.FC = () => {
   const width = 1000;
   
   const handleTimelineClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    // Disable timeline editing during playback
+    if (playbackMode === 'playback') return;
+    
     const rect = e.currentTarget.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
     const clickTime = (clickX / rect.width) * meta.duration;
@@ -24,20 +28,26 @@ export const Timeline: React.FC = () => {
     if (selectedTrackId) {
       selectTrack(null);
     }
-  }, [meta.duration, setTime, selectedTrackId, selectTrack]);
+  }, [meta.duration, setTime, selectedTrackId, selectTrack, playbackMode]);
   
   const handleTimelineMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    // Disable hover during playback
+    if (playbackMode === 'playback') return;
+    
     const rect = e.currentTarget.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseTime = (mouseX / rect.width) * meta.duration;
     setHoverTime(Math.max(0, Math.min(mouseTime, meta.duration)));
-  }, [meta.duration]);
+  }, [meta.duration, playbackMode]);
   
   const handleTimelineMouseLeave = useCallback(() => {
     setHoverTime(null);
   }, []);
   
   const handleTimelineDoubleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    // Disable track creation during playback
+    if (playbackMode === 'playback') return;
+    
     const rect = e.currentTarget.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
     const clickTime = (clickX / rect.width) * meta.duration;
@@ -52,20 +62,26 @@ export const Timeline: React.FC = () => {
     };
     
     addTrack(newTrack);
-  }, [meta.duration, addTrack]);
+  }, [meta.duration, addTrack, playbackMode]);
   
   const handleTrackClick = useCallback((e: React.MouseEvent<HTMLDivElement>, trackId: string) => {
+    // Disable track selection during playback
+    if (playbackMode === 'playback') return;
+    
     e.stopPropagation();
     selectTrack(trackId);
-  }, [selectTrack]);
+  }, [selectTrack, playbackMode]);
   
   const handleTrackDoubleClick = useCallback((e: React.MouseEvent<HTMLDivElement>, trackId: string) => {
+    // Disable track removal during playback
+    if (playbackMode === 'playback') return;
+    
     e.stopPropagation();
     // Remove track on double click
     if (confirm('Remove this track?')) {
       removeTrack(trackId);
     }
-  }, [removeTrack]);
+  }, [removeTrack, playbackMode]);
   
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -85,9 +101,28 @@ export const Timeline: React.FC = () => {
         )}
       </div>
       
+      {/* Mode indicator */}
+      <div style={{
+        display: 'inline-block',
+        marginTop: 4,
+        fontSize: '10px',
+        padding: '2px 6px',
+        borderRadius: '3px',
+        background: playbackMode === 'playback' ? '#4a9eff' : '#666',
+        color: '#fff',
+        fontWeight: 'bold',
+        textTransform: 'uppercase'
+      }}>
+        {playbackMode === 'playback' ? '▶️ Playback' : '✏️ Edit'}
+      </div>
+      
       {/* Instructions */}
       <div style={{fontSize:10, opacity:0.6, marginTop:2}}>
-        Click to set time • Double-click empty area to add track • Double-click track to remove
+        {playbackMode === 'playback' ? (
+          <span style={{color: '#4a9eff'}}>▶️ Playback Mode • Timeline editing disabled</span>
+        ) : (
+          'Click to set time • Double-click empty area to add track • Double-click track to remove'
+        )}
       </div>
       
       {/* Main timeline track */}
@@ -99,7 +134,8 @@ export const Timeline: React.FC = () => {
           marginTop: 6, 
           position: 'relative', 
           overflow: 'hidden',
-          cursor: 'pointer'
+          cursor: playbackMode === 'playback' ? 'default' : 'pointer',
+          opacity: playbackMode === 'playback' ? 0.7 : 1
         }}
         onClick={handleTimelineClick}
         onDoubleClick={handleTimelineDoubleClick}
@@ -196,22 +232,27 @@ export const Timeline: React.FC = () => {
       {/* Track list */}
       <div style={{marginTop: 8, fontSize: 11}}>
         {tracks.length === 0 ? (
-          <div style={{opacity: 0.5, fontStyle: 'italic'}}>No tracks • Double-click timeline to add</div>
+          <div style={{opacity: 0.5, fontStyle: 'italic'}}>
+            {playbackMode === 'playback' 
+              ? 'No tracks to play' 
+              : 'No tracks • Double-click timeline to add'
+            }
+          </div>
         ) : (
           tracks.map((track) => (
             <div 
               key={track.id} 
               style={{
                 marginBottom: 4, 
-                opacity: track.id === selectedTrackId ? 1 : 0.6,
+                opacity: track.id === selectedTrackId ? 1 : (playbackMode === 'playback' ? 0.4 : 0.6),
                 fontWeight: track.id === selectedTrackId ? 'bold' : 'normal',
                 color: track.id === selectedTrackId ? '#4a9eff' : '#e6e6e6',
-                cursor: 'pointer',
+                cursor: playbackMode === 'playback' ? 'default' : 'pointer',
                 padding: '2px 4px',
                 borderRadius: '2px',
                 background: track.id === selectedTrackId ? 'rgba(74, 158, 255, 0.1)' : 'transparent'
               }}
-              onClick={() => selectTrack(track.id)}
+              onClick={() => playbackMode !== 'playback' && selectTrack(track.id)}
             >
               {track.module.split('/').pop()} • {track.range[0].toFixed(1)}s - {track.range[1].toFixed(1)}s
             </div>
