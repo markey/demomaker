@@ -81,6 +81,7 @@ class PulsarFieldInstance implements EffectInstance {
 
     this.uniforms = {
       uTime: { value: 0 },
+      uPixelRatio: { value: (this.ctx.renderer as any).getPixelRatio?.() ?? 1 },
       uPointSize: { value: params.pointSize },
       uPulseSpeed: { value: params.pulseSpeed },
       uPulsePositions: { value: this.pulsesPos },
@@ -88,7 +89,7 @@ class PulsarFieldInstance implements EffectInstance {
     };
 
     const vertex = `
-      uniform float uTime; uniform float uPointSize; uniform float uPulseSpeed;\n
+      uniform float uTime; uniform float uPointSize; uniform float uPulseSpeed; uniform float uPixelRatio;\n
       uniform vec3 uPulsePositions[3]; uniform float uPulseTimes[3];\n
       attribute vec3 color; varying vec3 vColor; varying float vPulse;\n
       ${NOISE_GLSL}\n
@@ -118,7 +119,7 @@ class PulsarFieldInstance implements EffectInstance {
         vPulse = pulse(wp) + 0.4 * noise(wp*1.5 + vec3(uTime*1.2));\n
         vec4 mv = modelViewMatrix * vec4(displaced, 1.0);\n
         float size = (uPointSize * 200.0 / -mv.z) * (1.0 + vPulse*1.6);\n
-        gl_PointSize = size;\n
+        gl_PointSize = size / max(1.0, uPixelRatio);\n
         gl_Position = projectionMatrix * mv;\n
       }
     `;
@@ -203,6 +204,7 @@ class PulsarFieldInstance implements EffectInstance {
 
   update(dt: number, t: number, params: PulsarFieldParams): void {
     this.uniforms.uTime.value = t;
+    this.uniforms.uPixelRatio.value = (this.ctx.renderer as any).getPixelRatio?.() ?? 1;
     this.uniforms.uPointSize.value = params.pointSize;
     this.uniforms.uPulseSpeed.value = params.pulseSpeed;
     // drive built-in morph influence

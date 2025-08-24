@@ -23,7 +23,9 @@ export class RendererManager {
   private _bloom?: UnrealBloomPass;
   private _lastW = 0;
   private _lastH = 0;
-  private _lastDpr = 0;
+  private _lastSafeDpr = 0;
+  private _maxDim = 4096;
+  private _dprCap = 1.5; // cap DPR to reduce FBO pressure and drift
 
   constructor(canvas: HTMLCanvasElement, fps = 60) {
     this.canvas = canvas;
@@ -31,14 +33,23 @@ export class RendererManager {
     this.renderer.setClearColor(0x000000, 1);
     this._scheduler = new Scheduler(fps);
     this._resources = new ResourceManager();
+    // Cache GPU limits (best-effort)
+    try {
+      const gl = this.renderer.getContext() as WebGL2RenderingContext;
+      const maxRB = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) as number;
+      const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+      const cap = Math.max(1, Math.min(maxRB || 4096, maxTex || 4096));
+      this._maxDim = isFinite(cap) ? cap : 4096;
+    } catch {/* ignore */}
   }
 
   get time() { return this._time; }
 
   getSize() {
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const w = this.canvas.clientWidth || this.canvas.width;
-    const h = this.canvas.clientHeight || this.canvas.height;
+    const rect = this.canvas.getBoundingClientRect();
+    const w = rect.width || this.canvas.clientWidth || this.canvas.width;
+    const h = rect.height || this.canvas.clientHeight || this.canvas.height;
+    const dpr = window.devicePixelRatio || 1; // raw DPR (clamped later)
     return { w, h, dpr };
   }
 
@@ -49,12 +60,8 @@ export class RendererManager {
     h = Math.max(1, Math.floor(h));
 
     // Clamp effective DPR so FBOs never exceed device limits
-    const gl = this.renderer.getContext() as WebGL2RenderingContext;
-    const maxRB = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) as number;
-    const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
-    const maxDim = Math.max(1, Math.min(maxRB || 4096, maxTex || 4096));
-    const maxDprByDim = maxDim / Math.max(w, h);
-    const safeDpr = Math.max(1, Math.min(dpr, 2, maxDprByDim));
+    const maxDprByDim = this._maxDim / Math.max(w, h);
+    const safeDpr = Math.max(1, Math.min(dpr, this._dprCap, maxDprByDim));
 
     this.renderer.setPixelRatio(safeDpr);
     this.renderer.setSize(w, h, false);
@@ -62,17 +69,20 @@ export class RendererManager {
     cam.aspect = w / h;
     cam.updateProjectionMatrix();
     this._effect?.resize?.(w, h, safeDpr);
-    this._composer?.setPixelRatio(safeDpr);
+    if (this._composer) this._composer.setPixelRatio(safeDpr);
     this._composer?.setSize(w, h);
     this._bloom?.setSize(w, h);
-    this._lastW = w; this._lastH = h; this._lastDpr = safeDpr;
+    this._lastW = w; this._lastH = h; this._lastSafeDpr = safeDpr;
   }
 
   private ensureViewport() {
-    const { w, h, dpr } = this.getSize();
-    if (w !== this._lastW || h !== this._lastH || dpr !== this._lastDpr) {
-      this.updateViewport();
-    }
+    let { w, h, dpr } = this.getSize();
+    // Use rounded CSS sizes to avoid micro-drift from fractional values
+    w = Math.max(1, Math.round(w));
+    h = Math.max(1, Math.round(h));
+    const maxDprByDim = this._maxDim / Math.max(w, h);
+    const safeDpr = Math.max(1, Math.min(dpr, this._dprCap, maxDprByDim));
+    if (w !== this._lastW || h !== this._lastH || safeDpr !== this._lastSafeDpr) this.updateViewport();
   }
 
   createContext(fps: number): EffectContext {
@@ -112,7 +122,7 @@ export class RendererManager {
       const t = tms / 1000;
       const dt = this._scheduler.tick(t) || 0;
       this._time += dt;
-      // Keep renderer/composer/camera sizes in sync with CSS size
+      // Keep renderer/composer/camera sizes in sync with CSS size each frame
       this.ensureViewport();
       this._effect?.update(dt, this._time, (this as any)._params || {});
       if (this._composer && this._renderPass) {
@@ -136,7 +146,7 @@ export class RendererManager {
 
   setParams(params: any) { (this as any)._params = params; }
 
-  private _onResize = () => this.updateViewport();
+  private _onResize = () => { requestAnimationFrame(() => this.updateViewport()); };
 
   dispose() {
     this.stop();
