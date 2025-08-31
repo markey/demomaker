@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { useProjectStore } from '../state/projectStore';
 import { RendererManager, configurePost } from '../engine/RendererManager';
 import { getEffect } from '../plugins/PluginManager';
+import type { Track, TransitionTrack } from '../state/projectStore';
 
 export const Preview: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -10,9 +11,19 @@ export const Preview: React.FC = () => {
   const time = useProjectStore((s) => s.transport.time);
   const playbackMode = useProjectStore((s) => s.transport.playbackMode);
 
-  const activeTrack = useProjectStore((s) => s.getActiveTrack(time));
   const rmRef = useRef<RendererManager | null>(null);
-  const moduleId = activeTrack?.module;
+
+  // Compute active effects and transitions
+  const activeEffects = project.tracks.filter(track =>
+    track.kind === 'effect' && time >= track.range[0] && time < track.range[1]
+  );
+
+  const activeTransitions = project.tracks.filter(track =>
+    track.kind === 'transition' && time >= track.range[0] && time < track.range[1]
+  );
+
+  // For backward compatibility
+  const activeTrack = activeEffects[0] || null;
 
   // Init once
   useEffect(() => {
@@ -78,32 +89,67 @@ export const Preview: React.FC = () => {
     };
   }, []);
 
-  // Load/Reload effect when module or fps changes
+  // Load/Reload effects based on active tracks
   useEffect(() => {
-    const rm = rmRef.current; if (!rm || !moduleId || !activeTrack) return;
-    const mod = getEffect(moduleId);
-    if (!mod) return;
-    rm.loadEffect(mod, activeTrack.params, project.meta.fps).then(() => {
-      rm.setParams(activeTrack.params);
-      configurePost(rm, project.post as any);
-    });
-  }, [moduleId, project.meta.fps]);
+    const rm = rmRef.current; if (!rm) return;
 
-  // Update params without reloading
+    if (activeEffects.length > 1) {
+      // Load multiple effects for transitions
+      const effectsToLoad = activeEffects.map(track => ({
+        id: track.id,
+        moduleId: track.module,
+        params: track.params
+      }));
+
+      rm.loadMultipleEffects(effectsToLoad).then(() => {
+        configurePost(rm, project.post as any);
+      });
+
+      // Load transitions if any
+      if (activeTransitions.length > 0) {
+        const transitionsToLoad = activeTransitions.map(track => ({
+          id: track.id,
+          moduleId: track.module,
+          params: track.params
+        }));
+
+        rm.loadTransitions(transitionsToLoad);
+      }
+    } else if (activeEffects.length === 1) {
+      // Single effect - use original method
+      const track = activeEffects[0];
+      const mod = getEffect(track.module);
+      if (!mod) return;
+      rm.loadEffect(mod, track.params, project.meta.fps).then(() => {
+        rm.setParams(track.params);
+        configurePost(rm, project.post as any);
+      });
+    }
+  }, [activeEffects, activeTransitions, project.meta.fps]);
+
+  // Update params without reloading (for single effect compatibility)
   useEffect(() => {
-    const rm = rmRef.current; if (!rm || !activeTrack) return;
-    rm.setParams(activeTrack.params);
-  }, [activeTrack?.params]);
+    const rm = rmRef.current;
+    if (!rm || activeEffects.length !== 1) return;
 
-  // Placeholder: later drive time via transport/audio
-  useEffect(() => { void time; }, [time]);
+    const track = activeEffects[0];
+    if (track) {
+      rm.setParams(track.params);
+    }
+  }, [activeEffects.map(e => e.params)]);
+
+  // Synchronize renderer time with transport time
+  useEffect(() => {
+    const rm = rmRef.current; if (!rm) return;
+    rm.setTime(time);
+  }, [time]);
 
   return (
     <div ref={containerRef} style={{position:'relative', width:'100%', height:'100%', display:'grid', overflow:'hidden'}}>
       <canvas ref={canvasRef} style={{width:'100%', height:'100%', display:'block'}} />
       
-      {/* No track indicator */}
-      {!activeTrack && (
+            {/* No track indicator */}
+      {activeEffects.length === 0 && (
         <div style={{
           position: 'absolute',
           top: '50%',
@@ -118,16 +164,16 @@ export const Preview: React.FC = () => {
             {playbackMode === 'playback' ? 'No active effect' : 'No active track'}
           </div>
           <div style={{fontSize: '14px', opacity: 0.7}}>
-            {playbackMode === 'playback' 
-              ? 'Add tracks to the timeline' 
+            {playbackMode === 'playback'
+              ? 'Add tracks to the timeline'
               : 'Add a track in the timeline'
             }
           </div>
         </div>
       )}
-      
+
       {/* Current track info */}
-      {activeTrack && (
+      {activeEffects.length > 0 && (
         <div style={{
           position: 'absolute',
           top: '12px',
@@ -139,7 +185,15 @@ export const Preview: React.FC = () => {
           fontSize: '12px',
           pointerEvents: 'none'
         }}>
-          {activeTrack.module.split('/').pop()} • {time.toFixed(1)}s
+          {activeEffects.length === 1
+            ? `${activeEffects[0].module.split('/').pop()} • ${time.toFixed(1)}s`
+            : `${activeEffects.length} effects • ${time.toFixed(1)}s`
+          }
+          {activeTransitions.length > 0 && (
+            <div style={{fontSize: '10px', opacity: 0.8, marginTop: '2px'}}>
+              ⚡ {activeTransitions.length} transition{activeTransitions.length > 1 ? 's' : ''}
+            </div>
+          )}
         </div>
       )}
       

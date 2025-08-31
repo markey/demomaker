@@ -13,37 +13,50 @@ export const Transport: React.FC = () => {
   const setPlaybackMode = useProjectStore((s) => s.setPlaybackMode);
   const req = useRef<number | null>(null);
 
-  useEffect(() => {
-    if (!playing) { 
-      if (req.current) cancelAnimationFrame(req.current); 
-      return; 
+      useEffect(() => {
+    if (!playing) {
+      if (req.current) {
+        cancelAnimationFrame(req.current);
+        req.current = null;
+      }
+      return;
     }
-    
+
     let last = performance.now();
-    const loop = (now: number) => {
+    const loop = () => {
+      const now = performance.now();
       const dt = (now - last) / 1000;
       last = now;
-      
-      let newTime = time + dt;
-      
+
+      // Get current time from store each frame
+      const state = useProjectStore.getState();
+      const currentTime = state.transport.time;
+      let newTime = currentTime + dt;
+
       // Handle looping in playback mode
-      if (playbackMode === 'playback' && newTime >= duration) {
+      if (state.transport.playbackMode === 'playback' && newTime >= state.project.meta.duration) {
         newTime = 0; // Loop back to start
       }
-      
+
       // Stop if we've reached the end in edit mode
-      if (playbackMode === 'edit' && newTime >= duration) {
-        pause();
+      if (state.transport.playbackMode === 'edit' && newTime >= state.project.meta.duration) {
+        state.pause();
         return;
       }
-      
-      setTime(newTime);
+
+      state.setTime(newTime);
       req.current = requestAnimationFrame(loop);
     };
-    
+
     req.current = requestAnimationFrame(loop);
-    return () => { if (req.current) cancelAnimationFrame(req.current); };
-  }, [playing, time, duration, playbackMode, setTime, pause]);
+
+    return () => {
+      if (req.current) {
+        cancelAnimationFrame(req.current);
+        req.current = null;
+      }
+    };
+  }, [playing]);
 
   const handlePlay = () => {
     if (playbackMode === 'edit') {

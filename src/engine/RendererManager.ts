@@ -1,26 +1,32 @@
 import * as THREE from 'three';
-import type { EffectInstance, EffectModule, EffectContext } from './types';
+import type { EffectInstance, EffectModule, TransitionInstance, EffectContext } from './types';
 // Postprocessing (types available via three examples)
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { ResourceManager } from './ResourceManager';
 import { Scheduler } from './Scheduler';
+import { getEffect, getTransition } from '../plugins/PluginManager';
 
 export class RendererManager {
   readonly canvas: HTMLCanvasElement;
   readonly renderer: THREE.WebGLRenderer;
   readonly sceneGraph = new (class { scene = new THREE.Scene(); camera = new THREE.PerspectiveCamera(60, 16/9, 0.1, 100);} )();
   private _effect: EffectInstance | null = null;
+  private _effects = new Map<string, { instance: EffectInstance; params: any }>();
+  private _transitions = new Map<string, TransitionInstance>();
+  private _renderTargets = new Map<string, THREE.WebGLRenderTarget>();
   private _raf = 0;
   private _running = false;
   private _time = 0;
+  private _lastTime = 0; // Track last time for dt calculation
   private _scheduler: Scheduler;
   private _resources: ResourceManager;
   private _events = new Map<string, Set<(d:any)=>void>>();
   private _composer?: EffectComposer;
   private _renderPass?: RenderPass;
   private _bloom?: UnrealBloomPass;
+  private _transitionComposer?: EffectComposer;
   private _lastW = 0;
   private _lastH = 0;
   private _lastSafeDpr = 0;
@@ -45,6 +51,84 @@ export class RendererManager {
   }
 
   get time() { return this._time; }
+
+  // Set the current time (called by transport)
+  setTime(time: number) {
+    this._time = time;
+  }
+
+  // Load multiple effects for transition scenarios
+  async loadMultipleEffects(effects: Array<{ id: string; moduleId: string; params: any }>) {
+    const ctx = this.createContext(60); // fps will be set properly later
+    const { w, h } = this.getSize();
+
+    // Dispose existing multi-effects
+    this.disposeMultiEffects();
+
+    // Load new effects
+    for (const effect of effects) {
+      try {
+        const mod = getEffect(effect.moduleId);
+        if (mod) {
+          const instance = await mod.init(ctx, effect.params);
+          this._effects.set(effect.id, { instance, params: effect.params });
+
+          // Create render target for this effect
+          const renderTarget = new THREE.WebGLRenderTarget(w, h, {
+            minFilter: THREE.LinearFilter,
+            magFilter: THREE.LinearFilter,
+            format: THREE.RGBAFormat,
+            type: THREE.UnsignedByteType
+          });
+          this._renderTargets.set(effect.id, renderTarget);
+        }
+      } catch (error) {
+        console.error(`Failed to load effect ${effect.moduleId}:`, error);
+        // Continue loading other effects
+      }
+    }
+  }
+
+  // Load transition instances
+  async loadTransitions(transitions: Array<{ id: string; moduleId: string; params: any }>) {
+    const ctx = this.createContext(60);
+
+    // Dispose existing transitions
+    this.disposeTransitions();
+
+    // Load new transitions
+    for (const transition of transitions) {
+      try {
+        const mod = getTransition(transition.moduleId);
+        if (mod) {
+          const instance = mod.init(ctx, transition.params);
+          this._transitions.set(transition.id, instance);
+        }
+      } catch (error) {
+        console.error(`Failed to load transition ${transition.moduleId}:`, error);
+        // Continue loading other transitions
+      }
+    }
+  }
+
+  private disposeMultiEffects() {
+    for (const [id, effectData] of this._effects) {
+      effectData.instance.dispose();
+      const renderTarget = this._renderTargets.get(id);
+      if (renderTarget) {
+        renderTarget.dispose();
+      }
+    }
+    this._effects.clear();
+    this._renderTargets.clear();
+  }
+
+  private disposeTransitions() {
+    for (const transition of this._transitions.values()) {
+      transition.dispose();
+    }
+    this._transitions.clear();
+  }
 
   getSize() {
     const rect = this.canvas.getBoundingClientRect();
@@ -120,6 +204,7 @@ export class RendererManager {
     };
   }
 
+  // Backward compatibility method
   async loadEffect(mod: EffectModule<any>, params: any, fps: number) {
     if (this._effect) { this._effect.dispose(); this._effect = null; }
     const ctx = this.createContext(fps);
@@ -134,26 +219,60 @@ export class RendererManager {
     this.updateViewport();
   }
 
+
+
   start() {
     if (this._running) return;
     this._running = true;
-    
+
+    // Initialize time tracking
+    this._lastTime = performance.now() / 1000;
+
     // Initial viewport setup
     this.updateViewport();
     
     const loop = (tms: number) => {
-      const t = tms / 1000;
-      const dt = this._scheduler.tick(t) || 0;
-      this._time += dt;
+      // Use wall time for dt calculation, but ensure consistent timing
+      const currentTime = tms / 1000;
+      const dt = Math.min(currentTime - this._lastTime, 1/30); // Cap dt to prevent large jumps
+      this._lastTime = currentTime;
+
       // Keep renderer/composer/camera sizes in sync with CSS size each frame
       this.ensureViewport();
-      this._effect?.update(dt, this._time, (this as any)._params || {});
-      if (this._composer && this._renderPass) {
-        this._composer.render();
-      } else {
-        const scene = this._effect?.scene || this.sceneGraph.scene;
-        const camera = this._effect?.camera || this.sceneGraph.camera;
-        this.renderer.render(scene, camera);
+
+      // Choose rendering mode based on active effects
+      try {
+        if (this._effects.size > 1) {
+          // Multi-effect mode: render directly without composer
+          this.renderMultiEffects(dt, this._time);
+        } else if (this._effects.size === 1) {
+          // Single effect from multi-effects map
+          const effectData = this._effects.values().next().value;
+          if (effectData) {
+            effectData.instance.update(dt, this._time, effectData.params);
+            this.renderer.render(effectData.instance.scene, effectData.instance.camera);
+          }
+        } else {
+          // Fallback to legacy single effect
+          this._effect?.update(dt, this._time, (this as any)._params || {});
+          if (this._composer && this._renderPass) {
+            this._composer.render();
+          } else {
+            const scene = this._effect?.scene || this.sceneGraph.scene;
+            const camera = this._effect?.camera || this.sceneGraph.camera;
+            this.renderer.render(scene, camera);
+          }
+        }
+      } catch (error) {
+        console.warn('WebGL rendering error:', error);
+        // Continue with minimal rendering on error
+        try {
+          const scene = this._effect?.scene || this.sceneGraph.scene;
+          const camera = this._effect?.camera || this.sceneGraph.camera;
+          this.renderer.render(scene, camera);
+        } catch (fallbackError) {
+          console.error('Fallback rendering also failed:', fallbackError);
+        }
       }
       this._raf = requestAnimationFrame(loop);
     };
@@ -189,12 +308,28 @@ export class RendererManager {
     }, 16); // ~60fps debounce
   };
 
+
+
+  private renderMultiEffects(dt: number, time: number) {
+    if (this._effects.size === 0) return;
+
+    // For now, just render the first effect as a placeholder
+    // TODO: Implement proper transition blending between multiple effects
+    const firstEffectData = this._effects.values().next().value;
+    if (firstEffectData) {
+      firstEffectData.instance.update(dt, time, firstEffectData.params);
+      this.renderer.render(firstEffectData.instance.scene, firstEffectData.instance.camera);
+    }
+  }
+
   dispose() {
     this.stop();
     if (this._resizeTimeout) {
       clearTimeout(this._resizeTimeout);
       this._resizeTimeout = null;
     }
+    this.disposeMultiEffects();
+    this.disposeTransitions();
     this._effect?.dispose();
     this.renderer.dispose();
   }

@@ -21,6 +21,12 @@ export const Timeline: React.FC = () => {
     startTime: number;
     originalRange: [number, number];
   } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    time: number;
+    overlappingEffects: Track[];
+  } | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const width = 1000;
   
@@ -52,6 +58,56 @@ export const Timeline: React.FC = () => {
   const handleTimelineMouseLeave = useCallback(() => {
     setHoverTime(null);
   }, []);
+
+  const handleTimelineContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    // Disable context menu during playback
+    if (playbackMode === 'playback') return;
+
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const clickTime = (clickX / rect.width) * meta.duration;
+
+    // Find overlapping effects at this time
+    const overlappingEffects = tracks.filter(track =>
+      track.kind === 'effect' &&
+      clickTime >= track.range[0] &&
+      clickTime < track.range[1]
+    );
+
+    if (overlappingEffects.length >= 2) {
+      setContextMenu({
+        x: e.clientX,
+        y: e.clientY,
+        time: clickTime,
+        overlappingEffects
+      });
+    }
+  }, [playbackMode, meta.duration, tracks]);
+
+  const createTransition = useCallback((fromTrack: Track, toTrack: Track, time: number) => {
+    // Find the overlap range
+    const overlapStart = Math.max(fromTrack.range[0], toTrack.range[0]);
+    const overlapEnd = Math.min(fromTrack.range[1], toTrack.range[1]);
+    const overlapDuration = overlapEnd - overlapStart;
+
+    if (overlapDuration <= 0) return;
+
+    // Create transition track
+    const transitionTrack = {
+      id: `transition_${fromTrack.id}_${toTrack.id}_${Date.now()}`,
+      kind: 'transition' as const,
+      module: '@trans/cross-fade',
+      range: [overlapStart, overlapEnd] as [number, number],
+      params: { curve: 'linear' },
+      fromTrackId: fromTrack.id,
+      toTrackId: toTrack.id,
+      duration: overlapDuration
+    };
+
+    addTrack(transitionTrack);
+    setContextMenu(null);
+  }, [addTrack]);
   
   const handleTimelineDoubleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     // Disable track creation during playback
@@ -137,7 +193,7 @@ export const Timeline: React.FC = () => {
     const track = tracks.find(t => t.id === dragState.trackId);
     if (!track) return;
     
-    let newRange: [number, number] = [...track.range];
+    let newRange: [number, number] = [track.range[0], track.range[1]];
     
     if (dragState.type === 'move') {
       // Move the entire track
@@ -176,6 +232,18 @@ export const Timeline: React.FC = () => {
       };
     }
   }, [dragState, handleMouseMove, handleMouseUp]);
+
+  // Close context menu on click outside
+  React.useEffect(() => {
+    const handleClickOutside = () => {
+      setContextMenu(null);
+    };
+
+    if (contextMenu) {
+      document.addEventListener('click', handleClickOutside);
+      return () => document.removeEventListener('click', handleClickOutside);
+    }
+  }, [contextMenu]);
   
   return (
     <div ref={timelineRef} style={{padding:'8px 12px', borderTop:'1px solid #222'}}>
@@ -228,6 +296,7 @@ export const Timeline: React.FC = () => {
         onDoubleClick={handleTimelineDoubleClick}
         onMouseMove={handleTimelineMouseMove}
         onMouseLeave={handleTimelineMouseLeave}
+        onContextMenu={handleTimelineContextMenu}
       >
         {/* Drag indicator overlay */}
         {dragState && (
@@ -312,23 +381,24 @@ export const Timeline: React.FC = () => {
               position: 'absolute',
               left: `${(track.range[0] / meta.duration) * 100}%`,
               width: `${((track.range[1] - track.range[0]) / meta.duration) * 100}%`,
-              top: 8,
-              bottom: 8,
+              top: track.kind === 'transition' ? 12 : 8,
+              bottom: track.kind === 'transition' ? 12 : 8,
               background: track.kind === 'effect' ? '#4a9eff' : '#ff6b4a',
-              borderRadius: 2,
+              borderRadius: track.kind === 'transition' ? 4 : 2,
               cursor: playbackMode === 'playback' ? 'default' : 'grab',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: 14,
+              fontSize: track.kind === 'transition' ? 12 : 14,
               color: '#fff',
               fontWeight: 'bold',
-              border: track.id === selectedTrackId 
-                ? '2px solid #fff' 
+              border: track.id === selectedTrackId
+                ? '2px solid #fff'
                 : '1px solid rgba(255,255,255,0.2)',
               transition: 'all 0.1s ease',
               opacity: track.id === selectedTrackId ? 1 : 0.9,
-              userSelect: 'none'
+              userSelect: 'none',
+              transform: track.kind === 'transition' ? 'translateY(2px)' : 'none'
             }}
             onClick={(e) => {
               e.stopPropagation();
@@ -338,21 +408,25 @@ export const Timeline: React.FC = () => {
             onDoubleClick={(e) => handleTrackDoubleClick(e, track.id)}
             onMouseEnter={(e) => {
               if (playbackMode !== 'playback') {
-                e.currentTarget.style.transform = 'scale(1.02)';
+                e.currentTarget.style.transform = track.kind === 'transition'
+                  ? 'translateY(2px) scale(1.02)'
+                  : 'scale(1.02)';
                 e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
                 e.currentTarget.style.cursor = 'grab';
               }
             }}
             onMouseLeave={(e) => {
               if (playbackMode !== 'playback') {
-                e.currentTarget.style.transform = 'scale(1)';
+                e.currentTarget.style.transform = track.kind === 'transition'
+                  ? 'translateY(2px)'
+                  : 'scale(1)';
                 e.currentTarget.style.boxShadow = 'none';
                 e.currentTarget.style.cursor = 'grab';
               }
             }}
-            title={`${track.module} • ${track.range[0].toFixed(1)}s - ${track.range[1].toFixed(1)}s • Click to select, drag to move, drag edges to resize`}
+            title={`${track.kind === 'transition' ? 'Transition: ' : 'Effect: '}${track.module.split('/').pop()} • ${track.range[0].toFixed(1)}s - ${track.range[1].toFixed(1)}s • Click to select, drag to move, drag edges to resize`}
           >
-            {track.module.split('/').pop()}
+            {track.kind === 'transition' ? '⚡' : ''}{track.module.split('/').pop()}
           </div>
         ))}
         
@@ -435,10 +509,10 @@ export const Timeline: React.FC = () => {
           </div>
         ) : (
           tracks.map((track) => (
-            <div 
-              key={track.id} 
+            <div
+              key={track.id}
               style={{
-                marginBottom: 4, 
+                marginBottom: 4,
                 opacity: track.id === selectedTrackId ? 1 : (playbackMode === 'playback' ? 0.4 : 0.6),
                 fontWeight: track.id === selectedTrackId ? 'bold' : 'normal',
                 color: track.id === selectedTrackId ? '#4a9eff' : '#e6e6e6',
@@ -460,11 +534,70 @@ export const Timeline: React.FC = () => {
                 }
               }}
             >
+              <span style={{
+                color: track.kind === 'transition' ? '#ff6b4a' : '#4a9eff',
+                fontSize: '10px',
+                marginRight: '4px'
+              }}>
+                {track.kind === 'transition' ? '⚡' : '■'}
+              </span>
               {track.module.split('/').pop()} • {track.range[0].toFixed(1)}s - {track.range[1].toFixed(1)}s
+              {track.kind === 'transition' && 'fromTrackId' in track && track.fromTrackId && track.toTrackId && (
+                <span style={{fontSize: '10px', opacity: 0.7, marginLeft: '8px'}}>
+                  ({track.fromTrackId} → {track.toTrackId})
+                </span>
+              )}
             </div>
           ))
         )}
       </div>
+
+      {/* Context menu for creating transitions */}
+      {contextMenu && (
+        <div
+          style={{
+            position: 'fixed',
+            left: contextMenu.x,
+            top: contextMenu.y,
+            background: 'rgba(0,0,0,0.9)',
+            border: '1px solid #444',
+            borderRadius: '4px',
+            padding: '8px',
+            zIndex: 1000,
+            minWidth: '200px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{fontSize: '12px', color: '#fff', marginBottom: '8px', fontWeight: 'bold'}}>
+            Create Transition at {contextMenu.time.toFixed(1)}s
+          </div>
+          {contextMenu.overlappingEffects.map((fromTrack, i) =>
+            contextMenu.overlappingEffects.slice(i + 1).map((toTrack) => (
+              <div
+                key={`${fromTrack.id}-${toTrack.id}`}
+                style={{
+                  padding: '6px 8px',
+                  cursor: 'pointer',
+                  color: '#e6e6e6',
+                  fontSize: '11px',
+                  borderRadius: '2px',
+                  marginBottom: '2px'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(74, 158, 255, 0.2)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent';
+                }}
+                onClick={() => createTransition(fromTrack, toTrack, contextMenu.time)}
+              >
+                {fromTrack.module.split('/').pop()} → {toTrack.module.split('/').pop()}
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 };
